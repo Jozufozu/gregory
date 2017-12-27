@@ -10,6 +10,7 @@ import (
 type Context struct {
 	*discordgo.Session
 	*discordgo.Message
+	guild *discordgo.Guild
 }
 
 var (
@@ -50,7 +51,22 @@ func (ctx *Context) WhatDoICall(user *discordgo.User) (name string) {
 	return
 }
 
+func (ctx *Context) HowDoISay(emoji *discordgo.Emoji) (name string) {
+	if emoji.ID == "" {
+		name = emoji.Name
+	} else {
+		name = fmt.Sprintf("<:%s:%s>", emoji.Name, emoji.ID)
+	}
+
+	return
+}
+
 func (ctx *Context) GetGuild() (*discordgo.Guild, error) {
+
+	if ctx.guild != nil {
+		return ctx.guild, nil
+	}
+
 	channel, err := ctx.GetChannel()
 
 	if err != nil {
@@ -58,8 +74,15 @@ func (ctx *Context) GetGuild() (*discordgo.Guild, error) {
 	}
 
 	ctx.StateEnabled = false
-	defer func() { ctx.StateEnabled = true }()
-	return ctx.Guild(channel.GuildID)
+	guild, err := ctx.Guild(channel.GuildID)
+	ctx.StateEnabled = true
+
+	if err != nil {
+		return nil, err
+	}
+	ctx.guild = guild
+
+	return guild, err
 }
 
 func (ctx *Context) GetChannel() (*discordgo.Channel, error) {

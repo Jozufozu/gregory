@@ -21,6 +21,8 @@ func main() {
 	defer f.Close()
 	log.SetOutput(io.MultiWriter(f, os.Stdout))
 	defer economy.Data.Close()
+	defer AnalyticsStore.Close()
+	defer Save()
 
 	getenv, ok := os.LookupEnv("GREGORY_TOKEN")
 

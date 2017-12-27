@@ -96,7 +96,7 @@ func AddCommand(command *Command) {
 
 func HandleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if strings.HasPrefix(m.Content, Bang) {
-		RunCommand(&Context{s, m.Message}, m.Content[1:])
+		RunCommand(&Context{Session: s, Message: m.Message, guild: nil}, m.Content[1:])
 	}
 }
 
