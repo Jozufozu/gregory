@@ -40,6 +40,9 @@ func ManageTyping(s *discordgo.Session) {
 }
 
 func (ctx *Context) WhatDoICall(user *discordgo.User) (name string) {
+	if user == nil {
+		return "An old friend"
+	}
 	name = user.Username
 
 	if channel, err := ctx.Channel(ctx.ChannelID); err == nil {

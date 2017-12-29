@@ -17,6 +17,13 @@ func init() {
 	})
 
 	AddCommand(&Command{
+		Aliases:     []string{"play"},
+		Action:      play,
+		Usage:       "[game]",
+		Description: "Sets or clears Gregory's playing status.",
+	})
+
+	AddCommand(&Command{
 		Aliases:     []string{"conway", "gol"},
 		Action:      conway,
 		Usage:       "",

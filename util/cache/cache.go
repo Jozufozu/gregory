@@ -4,22 +4,60 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/jozufozu/gregory/commands"
 	"strings"
+	"sync"
 )
 
 const BotID = "387810222556708865"
 
-var ConnectedServers = make(map[string]bool)
-var ConnectedUsers = make(map[string]bool)
+var (
+	SaveUser         = make(chan *discordgo.User, 256)
+	ConnectedServers = make(map[string]bool)
+	ConnectedUsers   = make(map[string]bool)
 
-var namesToIDs = make(map[string]string)
-var namesToUsers = make(map[string]*discordgo.User)
-var guildsToNicksToUsers = make(map[string]map[string]*discordgo.User)
-var idsToUsers = make(map[string]*discordgo.User)
+	namesToIDs           = make(map[string]string)
+	namesToUsers         = make(map[string]*discordgo.User)
+	guildsToNicksToUsers = make(map[string]map[string]*discordgo.User)
+	idsToUsers           = make(map[string]*discordgo.User)
+	mu                   = new(sync.Mutex)
+)
 
-func LazyUserGet(id string) *discordgo.User {
-	if user, ok := idsToUsers[id]; ok {
+func init() {
+	go func() {
+		for {
+			select {
+			case user := <-SaveUser:
+				mu.Lock()
+				idsToUsers[user.ID] = user
+				mu.Unlock()
+			}
+		}
+	}()
+}
+
+func KnowUser(user *discordgo.User) bool {
+	mu.Lock()
+	_, know := idsToUsers[user.ID]
+	mu.Unlock()
+	if !know {
+		SaveUser <- user
+	}
+	return know
+}
+
+func LazyUserGet(ctx *commands.Context, userID string) *discordgo.User {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if user, ok := idsToUsers[userID]; ok {
 		return user
 	}
+
+	defer func() { ctx.StateEnabled = true }()
+	ctx.StateEnabled = false
+	if user, err := ctx.User(userID); err != nil {
+		return user
+	}
+
 	return nil
 }
 

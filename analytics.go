@@ -7,35 +7,18 @@ import (
 	"github.com/jozufozu/gregory/commands"
 	"github.com/jozufozu/gregory/util/cache"
 	"log"
+	"math"
 	"strings"
 	"sync"
 	"time"
-	"github.com/boltdb/bolt"
-	"errors"
-	"encoding/binary"
-	"encoding/json"
 )
 
 const statsColor = 0xff6611
 
-var AnalyticsStore *bolt.DB
 var guildAnalyses = make(map[string]*GuildStats)
 var channelAnalyses = make(map[string]*ChannelStats)
 
 func init() {
-	db, err := bolt.Open("analytics.db", 0600, nil)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	AnalyticsStore = db
-
-	AnalyticsStore.Update(func(tx *bolt.Tx) error {
-		tx.CreateBucketIfNotExists([]byte("guilds"))
-		return nil
-	})
-
 	commands.AddCommand(&commands.Command{
 		Aliases:     []string{"analyze"},
 		Action:      Analytics,
@@ -51,166 +34,15 @@ func init() {
 	})
 }
 
-func Save() {
-	AnalyticsStore.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("guilds"))
-
-		for id, stats := range guildAnalyses {
-			guild, _ := bucket.CreateBucketIfNotExists([]byte(id))
-			b := make([]byte, 8)
-			binary.PutUvarint(b, guild.Sequence())
-			marshal, err := json.Marshal(stats)
-
-			if err != nil {
-				continue
-			}
-
-			guild.Put(b, marshal)
-		}
-
-		return nil
-	})
-}
-
-func GetLastGuildStats(guildID string) (stats *GuildStats) {
-	AnalyticsStore.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("guilds"))
-		guildStats := bucket.Bucket([]byte(guildID))
-
-		if guildStats == nil {
-			return errors.New("")
-		}
-
-		b := make([]byte, 8)
-		binary.PutUvarint(b, guildStats.Sequence())
-
-		stats = new(GuildStats)
-		json.Unmarshal(guildStats.Get(b), stats)
-
-		return nil
-	})
-
-	return stats
-}
-
-type GuildStats struct {
-	TimeStamp *time.Time
-	Channels  map[string]*ChannelStats
-}
-
-func (gst *GuildStats) getTotals() (totals *ChannelStats) {
-	totals = &ChannelStats{Users: make(map[string]*UserStats)}
-
-	for _, stats := range gst.Channels {
-		totals = joinStatList(stats, totals)
-	}
-	return
-}
-
-type ChannelStats struct {
-	LastMessageID string
-	Users map[string]*UserStats
-}
-
-func (ch *ChannelStats) getTotals() (totals *UserStats) {
-	totals = &UserStats{
-		EmojisReacted:  make(map[string]uint64),
-		CharactersUsed: make(map[rune]uint64),
-	}
-
-	for _, stats := range ch.Users {
-		totals = joinUserStats(stats, totals)
-	}
-	return
-}
-
-func joinStatList(l, r *ChannelStats) *ChannelStats {
-	stats := &ChannelStats{Users: make(map[string]*UserStats)}
-
-	for k, v := range l.Users {
-		stats.Users[k] = v
-	}
-
-	for k, v := range r.Users {
-		if data, ok := stats.Users[k]; ok {
-			stats.Users[k] = joinUserStats(data, v)
-		} else {
-			stats.Users[k] = v
-		}
-	}
-
-	return stats
-}
-
-type UserStats struct {
-	MessagesSent      uint64
-	LinksLinked       uint64
-	ImagesSent        uint64
-	FilesSent         uint64
-	AdrianCommands    uint64
-	CelestineCommands uint64
-	GregoryCommands   uint64
-	CharactersUsed    map[rune]uint64
-	EmojisReacted     map[string]uint64
-}
-
-func joinUserStats(l, r *UserStats) *UserStats {
-	join := &UserStats{
-		MessagesSent:      l.MessagesSent + r.MessagesSent,
-		LinksLinked:       l.LinksLinked + r.LinksLinked,
-		ImagesSent:        l.ImagesSent + r.ImagesSent,
-		FilesSent:         l.FilesSent + r.FilesSent,
-		AdrianCommands:    l.AdrianCommands + r.AdrianCommands,
-		CelestineCommands: l.CelestineCommands + r.CelestineCommands,
-		GregoryCommands:   l.GregoryCommands + r.GregoryCommands,
-		EmojisReacted:     make(map[string]uint64),
-		CharactersUsed:    make(map[rune]uint64),
-	}
-
-	wg := new(sync.WaitGroup)
-	wg.Add(2)
-	go func() {
-		for k, v := range l.CharactersUsed {
-			join.CharactersUsed[k] = v
-		}
-
-		for k, v := range r.CharactersUsed {
-			join.CharactersUsed[k] = join.CharactersUsed[k] + v
-		}
-		wg.Done()
-	}()
-
-	go func() {
-		for k, v := range l.EmojisReacted {
-			join.EmojisReacted[k] = v
-		}
-
-		for k, v := range r.EmojisReacted {
-			join.EmojisReacted[k] = join.EmojisReacted[k] + v
-		}
-		wg.Done()
-	}()
-
-	wg.Wait()
-	return join
-}
-
 func Stats(ctx *commands.Context, raw string, args ...string) {
 	guild, _ := ctx.GetGuild()
 
-	guildStats, ok := guildAnalyses[guild.ID]
-
-	if !ok {
-		guildStats = GetLastGuildStats(guild.ID)
-	}
+	guildStats := GetLastGuildStats(guild.ID)
 
 	if guildStats == nil {
 		Analytics(ctx, "")
 		return
 	}
-
-	ctx.StartTyping()
-	defer ctx.DoneTyping()
 
 	totals := guildStats.getTotals()
 
@@ -220,74 +52,139 @@ func Stats(ctx *commands.Context, raw string, args ...string) {
 	}
 
 	var (
-		user *discordgo.User = nil
-		data *UserStats      = nil
-		name                 = ""
-		function             = ""
+		user     *discordgo.User = nil
+		data     *UserStats      = nil
+		name                     = ""
+		function                 = ""
 	)
 
 	user = cache.GetUser(ctx, args[0])
+	cut := 1
 
 	if user != nil {
 		data = totals.Users[user.ID]
 		name = ctx.WhatDoICall(user)
 
 		if len(args) > 1 {
-			function = args[1]
+			function = strings.ToLower(args[1])
+			cut = 2
 		}
 
 	} else {
 		data = totals.getTotals()
 		name = guild.Name
-		function = args[0]
+		function = strings.ToLower(args[0])
 	}
 
 	functions := map[string]func(){
-		"react": func() {
-			buf := new(bytes.Buffer)
-
-			reactions := make(map[string]uint64)
-			for k, v := range data.EmojisReacted {
-				reactions[k] = v
-			}
-
-			for len(reactions) > 0 {
-				var emojiMax = ""
-				var timesMax uint64
-
-				for emoji, times := range reactions {
-					if emoji == "" || times > timesMax {
-						emojiMax, timesMax = emoji, times
-					}
+		"react": func() { sendReactionStats(ctx, data, name, args[cut:]...) },
+		"shrug": func() {
+			if user != nil {
+				if data.ShouldersShruggedOverTwo == 0 {
+					ctx.Reply(fmt.Sprintf("%s has never shrugged", name))
+					return
 				}
-				delete(reactions, emojiMax)
 
-				buf.WriteString(fmt.Sprintf("%s: %v\n", emojiMax, timesMax))
+				ctx.Reply(fmt.Sprintf("%s has shrugged %v times", name, data.ShouldersShruggedOverTwo))
+			} else {
+				sendLeaderBoard(ctx, totals, name, "%s's %v most confused:", 0, func(stats *UserStats) float64 {
+					return float64(stats.ShouldersShruggedOverTwo)
+				}, args[cut:]...)
 			}
+		},
+		"messages": func() {
+			if user != nil {
+				if data.MessagesSent == 0 {
+					ctx.Reply(fmt.Sprintf("%s has never said a word.", name))
+					return
+				}
 
-			ctx.ChannelMessageSendEmbed(ctx.ChannelID, &discordgo.MessageEmbed{
-				Title:       fmt.Sprintf("%s's Reactions:", name),
-				Description: buf.String(),
-				Color:       statsColor,
-			})
+				ctx.Reply(fmt.Sprintf("%s has sent %v messages.", name, data.MessagesSent))
+			} else {
+				sendLeaderBoard(ctx, totals, name, "%s's %v most talkative:", 0, func(stats *UserStats) float64 {
+					return float64(stats.MessagesSent)
+				}, args[cut:]...)
+			}
+		},
+		"characters": func() {
+			if user != nil {
+				var total uint64
+				for _, count := range data.CharactersUsed {
+					total += count
+				}
+				if total == 0 {
+					ctx.Reply(fmt.Sprintf("%s has never said a word.", name))
+					return
+				}
+
+				ctx.Reply(fmt.Sprintf("%s has typed %v characters.", name, total))
+			} else {
+				sendLeaderBoard(ctx, totals, name, "%s's top %v typists:", 0, func(stats *UserStats) float64 {
+					var total uint64
+					for _, count := range stats.CharactersUsed {
+						total += count
+					}
+					return float64(total)
+				}, args[cut:]...)
+			}
+		},
+		"uniqueCharacters": func() {
+			if user != nil {
+				u := len(data.CharactersUsed)
+				if u == 0 {
+					ctx.Reply(fmt.Sprintf("%s has never said a word.", name))
+					return
+				}
+
+				ctx.Reply(fmt.Sprintf("%s has pressed %s different buttons.", name, u))
+			} else {
+				sendLeaderBoard(ctx, totals, name, "%s's %v most diverse:", 0, func(stats *UserStats) float64 {
+					return float64(len(stats.CharactersUsed))
+				}, args[cut:]...)
+			}
+		},
+		"leederboard": func() {
+			if user != nil {
+				u := eneleze(data)
+				if u == 0 {
+					ctx.Reply(fmt.Sprintf("%s has never said a word.", name))
+					return
+				}
+
+				ctx.Reply(fmt.Sprintf("`%s == E%v`", name, u))
+			} else {
+				sendLeaderBoard(ctx, totals, name, "%s's %v most eextravagant:", 4, eneleze, args[cut:]...)
+			}
 		},
 		"": func() {
-
+			ctx.Reply("Sorry, I don't know what you want me to do.")
 		},
 	}
 
-	if whatToDo, do := functions[function]; do {
-		whatToDo()
-	} else {
-		functions[""]()
+	for k, v := range functions {
+		if strings.HasPrefix(strings.ToLower(k), function) {
+			v()
+			return
+		}
 	}
+
+	functions[""]()
+}
+
+func eneleze(stats *UserStats) float64 {
+	return float64(stats.CharactersUsed['e']+stats.CharactersUsed['E']) / math.Sqrt(math.Pow(float64(stats.CharactersUsed[' ']+stats.MessagesSent), 2)+math.Pow(float64(stats.CharactersUsed['o']+stats.CharactersUsed['O']), 2))
 }
 
 func Analytics(ctx *commands.Context, raw string, args ...string) {
 	channelID := ctx.ChannelID
+	full := false
 
 	if len(args) > 0 {
-		channelID = args[0]
+		full = strings.ToLower(args[0]) == "full"
+
+		if len(args) > 1 {
+			channelID = args[1]
+		}
 	}
 
 	channel, err := ctx.Channel(channelID)
@@ -298,7 +195,9 @@ func Analytics(ctx *commands.Context, raw string, args ...string) {
 	}
 
 	guildID := channel.GuildID
+	ctx.StateEnabled = false
 	guild, err := ctx.Guild(guildID)
+	ctx.StateEnabled = true
 
 	if err != nil {
 		ctx.Reply("Sorry, I don't know about that place.")
@@ -310,14 +209,20 @@ func Analytics(ctx *commands.Context, raw string, args ...string) {
 		return
 	}
 
-	ctx.ConfirmWithMessage(ctx.Author, fmt.Sprintf("Ananlyzing %s.\nThis might take a while.", guild.Name), func() {
+	var lastGuildStats *GuildStats
+
+	if !full {
+		lastGuildStats = GetLastGuildStats(guildID)
+	}
+
+	f := func() {
 		ctx.StartTyping()
 		defer ctx.DoneTyping()
 
 		t := time.Now()
 
 		if channel.Type == discordgo.ChannelTypeGuildText {
-			GetGuildStats(ctx, guildID)
+			GetGuildStats(ctx, guildID, lastGuildStats)
 		} else {
 			_, err := GetChannelStats(ctx, channel, nil)
 
@@ -327,8 +232,15 @@ func Analytics(ctx *commands.Context, raw string, args ...string) {
 		}
 
 		ctx.Reply(fmt.Sprintf("Done! Took %s", time.Since(t)))
-	})
+	}
+
+	if lastGuildStats == nil {
+		ctx.ConfirmWithMessage(ctx.Author, fmt.Sprintf("Do you want me to do a full analysis on %s?\nThis might take a while.", guild.Name), f)
+	} else {
+		f()
+	}
 }
+
 func sendChannelStats(ctx *commands.Context, totals *ChannelStats) {
 	t := time.Now()
 
@@ -358,7 +270,6 @@ func sendChannelStats(ctx *commands.Context, totals *ChannelStats) {
 	embeds = append(embeds, getUserStatEmbeds(users)...)
 	embeds = append(embeds, &discordgo.MessageEmbed{
 		Title:       "In all...",
-		Type:        "rich",
 		Description: buf.String(),
 		Color:       statsColor,
 	})
@@ -371,106 +282,124 @@ func sendChannelStats(ctx *commands.Context, totals *ChannelStats) {
 func buildUserStatText(ctx *commands.Context, totals *ChannelStats) []*discordgo.MessageEmbedField {
 	builtUserFields := make([]*discordgo.MessageEmbedField, len(totals.Users))
 
-	users := make(map[string]*UserStats)
-	for k, v := range totals.Users {
-		users[k] = v
+	type send struct {
+		rank  uint64
+		field *discordgo.MessageEmbedField
 	}
 
-	i := 0
-	for len(users) > 0 {
-		var userID = ""
-		var userStats *UserStats = nil
+	ch := make(chan *send, len(totals.Users))
+	wg := new(sync.WaitGroup)
 
-		for id, stats := range users {
-			if userStats == nil || stats.MessagesSent > userStats.MessagesSent {
-				userID, userStats = id, stats
+	for userID, userStats := range totals.Users {
+		wg.Add(1)
+		go func(userID string, userStats *UserStats) {
+			defer wg.Done()
+
+			user := cache.LazyUserGet(ctx, userID)
+
+			if user == nil {
+				return
 			}
-		}
 
-		delete(users, userID)
+			userField := new(discordgo.MessageEmbedField)
 
-		user := cache.LazyUserGet(userID)
+			buf := new(bytes.Buffer)
 
-		if user == nil {
-			user, _ = ctx.User(userID)
-		}
+			userField.Name = ctx.WhatDoICall(user)
 
-		if user == nil {
-			continue
-		}
-
-		userField := new(discordgo.MessageEmbedField)
-
-		buf := new(bytes.Buffer)
-
-		userField.Name = ctx.WhatDoICall(user)
-
-		if userStats.MessagesSent > 1 {
-			buf.WriteString(fmt.Sprintf("has sent %v messages", userStats.MessagesSent))
-		} else if userStats.MessagesSent == 1 {
-			buf.WriteString("has sent one message")
-		} else {
-			buf.WriteString("has never sent a message")
-		}
-		if userStats.LinksLinked > 0 {
-			if userStats.LinksLinked > 1 {
-				buf.WriteString(fmt.Sprintf(",\n%v of which had links", userStats.LinksLinked))
+			if userStats.MessagesSent > 1 {
+				buf.WriteString(fmt.Sprintf("has sent %v messages", userStats.MessagesSent))
+			} else if userStats.MessagesSent == 1 {
+				buf.WriteString("has sent one message")
 			} else {
-				buf.WriteString(",\none of which had a link")
+				buf.WriteString("has never sent a message")
 			}
-		}
-		if userStats.ImagesSent > 0 {
-			if userStats.ImagesSent > 1 {
-				buf.WriteString(fmt.Sprintf(",\nand has shared %v images", userStats.ImagesSent))
+			if userStats.LinksLinked > 0 {
+				if userStats.LinksLinked > 1 {
+					buf.WriteString(fmt.Sprintf(",\n%v of which had links", userStats.LinksLinked))
+				} else {
+					buf.WriteString(",\none of which had a link")
+				}
+			}
+			if userStats.ImagesSent > 0 {
+				if userStats.ImagesSent > 1 {
+					buf.WriteString(fmt.Sprintf(",\nand has shared %v images", userStats.ImagesSent))
+				} else {
+					buf.WriteString(",\nand has shared one image")
+				}
+			}
+			buf.WriteString(".\n")
+
+			e := userStats.CharactersUsed['e'] + userStats.CharactersUsed['E']
+			if e > 1 {
+				buf.WriteString(fmt.Sprintf("They've used the holee letter %v times.", e))
+			} else if e == 1 {
+				buf.WriteString("They've used the holee letter one time.")
 			} else {
-				buf.WriteString(",\nand has shared one image")
+				buf.WriteString("They are the scum of this earth.")
 			}
-		}
-		buf.WriteString(".\n")
 
-		e := userStats.CharactersUsed['e'] + userStats.CharactersUsed['E']
-		if e > 1 {
-			buf.WriteString(fmt.Sprintf("They've used the holee letter %v times.", e))
-		} else if e == 1 {
-			buf.WriteString("They've used the holee letter one time.")
-		} else {
-			buf.WriteString("They are the scum of this earth.")
-		}
-
-		buf.WriteString("\n\n")
-		userField.Value = buf.String()
-
-		builtUserFields[i] = userField
-		i++
+			buf.WriteString("\n\n")
+			userField.Value = buf.String()
+			ch <- &send{
+				rank:  userStats.MessagesSent,
+				field: userField,
+			}
+		}(userID, userStats)
 	}
+
+	wg.Wait()
+
+	sorter := make(map[*send]bool)
+
+	for len(ch) > 0 {
+		sorter[<-ch] = true
+	}
+
+	for i := 0; len(sorter) > 0; i++ {
+		var greatest *send
+
+		for k := range sorter {
+			if greatest == nil || k.rank > greatest.rank {
+				greatest = k
+			}
+		}
+
+		delete(sorter, greatest)
+
+		builtUserFields[i] = greatest.field
+	}
+
 	return builtUserFields
 }
+
 func getUserStatEmbeds(users []*discordgo.MessageEmbedField) []*discordgo.MessageEmbed {
 	length := len(users)
-	if length < 25 {
+	const split = 20
+	if length < split {
 		return []*discordgo.MessageEmbed{{
 			Color:  statsColor,
 			Fields: users,
 		}}
 	} else {
-		segments := length / 25
+		segments := length / split
 
-		if segments*25 < length {
+		if segments*split < length {
 			segments++
 		}
 
 		out := make([]*discordgo.MessageEmbed, segments)
 
 		for segment := 0; segment < segments; segment++ {
-			sliceFrom := segment * 25
-			sliceTo := (segment + 1) * 25
+			sliceFrom := segment * split
+			sliceTo := (segment + 1) * split
 
 			if sliceTo > length {
 				sliceTo = length
 			}
 
 			out[segment] = &discordgo.MessageEmbed{
-				Color:  0xff6611,
+				Color:  statsColor,
 				Fields: users[sliceFrom:sliceTo],
 			}
 		}
@@ -478,13 +407,11 @@ func getUserStatEmbeds(users []*discordgo.MessageEmbedField) []*discordgo.Messag
 	}
 }
 
-func GetGuildStats(ctx *commands.Context, guildID string) *GuildStats {
+func GetGuildStats(ctx *commands.Context, guildID string, oldGuildStats *GuildStats) *GuildStats {
 	channels, _ := ctx.GuildChannels(guildID)
 
 	statsChan := make(chan *GuildStats, len(channels))
 	serverWait := new(sync.WaitGroup)
-
-	oldGuildStats := GetLastGuildStats(guildID)
 
 	for _, channel := range channels {
 		if channel.Type == discordgo.ChannelTypeGuildVoice || channel.Type == discordgo.ChannelTypeGuildCategory {
@@ -526,6 +453,7 @@ func GetGuildStats(ctx *commands.Context, guildID string) *GuildStats {
 	t := time.Now()
 	masterStats.TimeStamp = &t
 	guildAnalyses[guildID] = masterStats
+	go Save()
 
 	return masterStats
 }
@@ -537,7 +465,7 @@ func GetChannelStats(ctx *commands.Context, channel *discordgo.Channel, existing
 		return nil, err
 	}
 
-	if len(messages) == 0 {
+	if messages == nil || len(messages) == 0 {
 		if existing != nil {
 			return existing, nil
 		} else {
@@ -554,6 +482,41 @@ func GetChannelStats(ctx *commands.Context, channel *discordgo.Channel, existing
 	channelStats.LastMessageID = messages[0].ID
 	channelAnalyses[channel.ID] = channelStats
 	return channelStats, nil
+}
+
+func getChannelMessages(ctx *commands.Context, channel *discordgo.Channel, existing *ChannelStats) ([]*discordgo.Message, error) {
+	t := time.Now()
+
+	after := "0"
+
+	if existing != nil && existing.LastMessageID != "" {
+		after = existing.LastMessageID
+	}
+
+	messages, err := ctx.ChannelMessages(channel.ID, 100, "", after, "")
+
+	if len(messages) == 0 {
+		log.Printf("No new messages in %s.\n", channel.Name)
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	master := make([]*discordgo.Message, len(messages))
+
+	copy(master, messages)
+
+	for len(messages) == 100 {
+		messages, _ = ctx.ChannelMessages(channel.ID, 100, "", messages[0].ID, "")
+
+		master = append(messages, master...)
+	}
+
+	log.Printf("Got all %v messages in %s, took %s\n", len(master), channel.Name, time.Since(t))
+
+	return master, nil
 }
 
 func parallelAnalyze(ctx *commands.Context, messages []*discordgo.Message) *ChannelStats {
@@ -599,14 +562,15 @@ func parallelAnalyze(ctx *commands.Context, messages []*discordgo.Message) *Chan
 func analyze(ctx *commands.Context, messages []*discordgo.Message) *ChannelStats {
 	stats := &ChannelStats{Users: make(map[string]*UserStats)}
 	wg := new(sync.WaitGroup)
+	mu := new(sync.Mutex)
 
 	for _, message := range messages {
 		if message.Type != discordgo.MessageTypeDefault {
 			continue
 		}
+		go cache.KnowUser(message.Author)
 
 		wg.Add(2)
-
 		go func() {
 			defer wg.Done()
 			if message.Reactions == nil || len(message.Reactions) == 0 {
@@ -626,14 +590,37 @@ func analyze(ctx *commands.Context, messages []*discordgo.Message) *ChannelStats
 
 		data := getStatsForID(stats, message.Author.ID)
 
+		for _, embed := range message.Embeds {
+			if embed.URL != "" {
+				data.LinksLinked++
+			}
+			if embed.Type == "rich" {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					defer mu.Unlock()
+					mu.Lock()
+					countCharacters(data, embed.Description)
+					countCharacters(data, embed.Title)
+
+					if len(embed.Fields) > 0 {
+						for _, field := range embed.Fields {
+							countCharacters(data, field.Name)
+							countCharacters(data, field.Value)
+						}
+					}
+				}()
+			}
+		}
+
 		data.MessagesSent++
 		content := message.ContentWithMentionsReplaced()
 
 		go func() {
 			defer wg.Done()
-			for _, char := range content {
-				data.CharactersUsed[char] = data.CharactersUsed[char] + 1
-			}
+			defer mu.Unlock()
+			mu.Lock()
+			countCharacters(data, content)
 		}()
 
 		if strings.HasPrefix(content, "!") {
@@ -651,16 +638,16 @@ func analyze(ctx *commands.Context, messages []*discordgo.Message) *ChannelStats
 			data.FilesSent++
 		}
 
-		for _, embed := range message.Embeds {
-			if embed.URL != "" {
-				data.LinksLinked++
-			}
-		}
-
 		wg.Wait()
 	}
 
 	return stats
+}
+func countCharacters(data *UserStats, content string) {
+	data.ShouldersShruggedOverTwo += uint64(strings.Count(content, "¯\\_(ツ)_/¯"))
+	for _, char := range content {
+		data.CharactersUsed[char] = data.CharactersUsed[char] + 1
+	}
 }
 
 func getStatsForID(stats *ChannelStats, userID string) *UserStats {
@@ -675,34 +662,4 @@ func getStatsForID(stats *ChannelStats, userID string) *UserStats {
 		data = existing
 	}
 	return data
-}
-
-func getChannelMessages(ctx *commands.Context, channel *discordgo.Channel, existing *ChannelStats) ([]*discordgo.Message, error) {
-	t := time.Now()
-
-	after := "0"
-
-	if existing != nil && existing.LastMessageID != "" {
-		after = existing.LastMessageID
-	}
-
-	messages, err := ctx.ChannelMessages(channel.ID, 100, "", after, "")
-
-	if err != nil {
-		return nil, err
-	}
-
-	master := make([]*discordgo.Message, len(messages))
-
-	copy(master, messages)
-
-	for len(messages) == 100 {
-		messages, _ = ctx.ChannelMessages(channel.ID, 100, "", messages[0].ID, "")
-
-		master = append(messages, master...)
-	}
-
-	log.Printf("Got all %v messages in %s, took %s\n", len(master), channel.Name, time.Since(t))
-
-	return master, nil
 }
