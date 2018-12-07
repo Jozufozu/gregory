@@ -10,7 +10,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"unicode"
 )
 
 func main() {
@@ -38,6 +40,7 @@ func main() {
 	}
 
 	dg.AddHandler(HandleLog)
+	dg.AddHandler(HandleReddit)
 	dg.AddHandler(commands.HandleMessage)
 	dg.AddHandler(commands.PromptHandler)
 
@@ -63,7 +66,7 @@ func main() {
 			var str string
 			fmt.Scan(&str)
 
-			if str == "exit" {
+			if strings.HasPrefix("exit", str) {
 				sc <- nil
 			}
 		}
@@ -72,10 +75,35 @@ func main() {
 	<-sc
 }
 
+func HandleReddit(s *discordgo.Session, m *discordgo.MessageCreate) {
+	ctx := commands.Context{Session: s, Message: m.Message}
+
+	if index := strings.Index(m.Content, "r/"); index >= 0 {
+		end := -1
+		for i, rune := range m.Content[index+2:] {
+			if !(unicode.IsLetter(rune) || unicode.IsNumber(rune) || rune == '-' || rune == '_') {
+				end = i + index - 2
+				break
+			}
+		}
+
+		if end == -1 {
+			end = len(m.Content)
+		}
+
+		embed := &discordgo.MessageEmbed{
+			Title: m.Content[index:end],
+			URL:   "https://reddit.com/r/" + m.Content[(index+2):end],
+			Color: 0xff4906,
+		}
+		ctx.ChannelMessageSendEmbed(ctx.ChannelID, embed)
+	}
+}
+
 func HandleLog(s *discordgo.Session, m *discordgo.MessageCreate) {
 	ctx := commands.Context{Session: s, Message: m.Message}
 	guild, _ := ctx.GetGuild()
 	channel, _ := ctx.GetChannel()
 
-	log.Printf("[%s]:[%s]: <%s> \"%s\"", guild.Name, channel.Name, ctx.WhatDoICall(m.Author), m.ContentWithMentionsReplaced())
+	log.Printf("[%s]:[%s]: <%s> \"%s\"", guild.Name, channel.Name, m.Author.Username, m.ContentWithMentionsReplaced())
 }

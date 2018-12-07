@@ -9,7 +9,7 @@ import (
 	"strconv"
 )
 
-func sendLeaderBoard(ctx *commands.Context, totals *ChannelStats, serverName, leaderBoardFormat string, prec int, value func(stats *UserStats) float64, args ...string) {
+func sendLeaderBoard(ctx *commands.Context, totals *ChannelStats, serverName, leaderBoardFormat string, prec int, heuristic func(stats *UserStats) float64, args ...string) {
 	users := make(map[string]*UserStats)
 	for k, v := range totals.Users {
 		users[k] = v
@@ -36,13 +36,13 @@ func sendLeaderBoard(ctx *commands.Context, totals *ChannelStats, serverName, le
 		)
 
 		for u, s := range users {
-			if userID == "" || value(s) > value(stats) {
+			if userID == "" || heuristic(s) > heuristic(stats) {
 				userID, stats = u, s
 			}
 		}
 		delete(users, userID)
 
-		value := value(stats)
+		value := heuristic(stats)
 		if value == 0 {
 			max = i
 			break
@@ -90,13 +90,13 @@ func sendReactionStats(ctx *commands.Context, data *UserStats, name string, args
 	for k, v := range data.EmojisReacted {
 		reactions[k] = v
 	}
-	var max, i uint64 = 0xffffffff, 0
+
+	var max, i uint64 = 10, 0
 	if len(args) > 0 {
 		max, _ = strconv.ParseUint(args[0], 10, 64)
 	}
 
-	u := uint64(len(reactions))
-	if max > u {
+	if u := uint64(len(reactions)); max > u {
 		max = u
 	}
 
@@ -104,6 +104,7 @@ func sendReactionStats(ctx *commands.Context, data *UserStats, name string, args
 	maxPlaceLength := len(s)
 	maxCountLength := 0
 	buf := new(bytes.Buffer)
+
 	for i < max && len(reactions) > 0 {
 		var emojiMax = ""
 		var timesMax uint64
@@ -148,8 +149,10 @@ func sendReactionStats(ctx *commands.Context, data *UserStats, name string, args
 		buf.WriteString(emojiMax)
 
 		buf.WriteString("\n")
+
 		i++
 	}
+
 	ctx.ChannelMessageSendEmbed(ctx.ChannelID, &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("%s's Top Reactions:", name),
 		Description: buf.String(),

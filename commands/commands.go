@@ -16,6 +16,13 @@ func init() {
 		Description: "Provides a list of available commands",
 	})
 
+	//AddCommand(&Command{
+	//	Aliases:     []string{"profile"},
+	//	Action:      profile,
+	//	Usage:       "[user]",
+	//	Description: "Sends you a user's profile picture",
+	//})
+
 	AddCommand(&Command{
 		Aliases:     []string{"play"},
 		Action:      play,
@@ -102,6 +109,10 @@ func AddCommand(command *Command) {
 }
 
 func HandleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if m.Author.Bot {
+		return
+	}
+
 	if strings.HasPrefix(m.Content, Bang) {
 		RunCommand(&Context{Session: s, Message: m.Message, guild: nil}, m.Content[1:])
 	}
@@ -140,35 +151,62 @@ func splitArgs(raw *string) []string {
 }
 
 func help(ctx *Context, raw string, args ...string) {
-	fields := make([]*discordgo.MessageEmbedField, len(commands))
+	if len(args) == 0 {
+		fields := make([]*discordgo.MessageEmbedField, len(commands))
 
-	buf := new(bytes.Buffer)
-	for i, cmd := range commands {
-		buf.Reset()
-		f := new(discordgo.MessageEmbedField)
+		buf := new(bytes.Buffer)
+		for i, cmd := range commands {
+			for j, name := range cmd.Aliases {
+				buf.WriteString(Bang)
+				buf.WriteString(name)
+				if j != len(cmd.Aliases)-1 {
+					buf.WriteString(" | ")
+				}
+			}
+			buf.WriteString(" ")
+			buf.WriteString(cmd.Usage)
 
-		for j, name := range cmd.Aliases {
-			buf.WriteString(Bang)
-			buf.WriteString(name)
-			if j != len(cmd.Aliases)-1 {
-				buf.WriteString(" | ")
+			f := &discordgo.MessageEmbedField{
+				Name:  buf.String(),
+				Value: fmt.Sprintf("*%s*", cmd.Description),
+			}
+
+			fields[i] = f
+
+			buf.Reset()
+		}
+
+		embed := &discordgo.MessageEmbed{
+			Title:  "Commands:",
+			Color:  0x23aaee,
+			Fields: fields,
+		}
+
+		ctx.ChannelMessageSendEmbed(ctx.ChannelID, embed)
+	} else {
+		find := args[0]
+		for _, cmd := range commands {
+			for _, name := range cmd.Aliases {
+				if strings.HasPrefix(name, find) {
+					buf := new(bytes.Buffer)
+
+					for j, name := range cmd.Aliases {
+						buf.WriteString(Bang)
+						buf.WriteString(name)
+						if j != len(cmd.Aliases)-1 {
+							buf.WriteString(" | ")
+						}
+					}
+					buf.WriteString(" ")
+					buf.WriteString(cmd.Usage)
+
+					ctx.ChannelMessageSendEmbed(ctx.ChannelID, &discordgo.MessageEmbed{
+						Title:       buf.String(),
+						Description: fmt.Sprintf("*%s*", cmd.Description),
+						Color:       0x23aaee,
+					})
+				}
 			}
 		}
-		buf.WriteString(" ")
-		buf.WriteString(cmd.Usage)
-		f.Name = buf.String()
-		buf.Reset()
-
-		f.Value = fmt.Sprintf("*%s*", cmd.Description)
-
-		fields[i] = f
 	}
-
-	embed := &discordgo.MessageEmbed{
-		Title:  "Commands:",
-		Color:  0x23aaee,
-		Fields: fields,
-	}
-
-	ctx.ChannelMessageSendEmbed(ctx.ChannelID, embed)
 }

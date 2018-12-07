@@ -13,7 +13,10 @@ import (
 var Data *bolt.DB
 
 func checkAndUpdate() {
-	var b bool
+	var (
+		b    bool
+		days int
+	)
 	Data.View(func(tx *bolt.Tx) error {
 		accounts := tx.Bucket([]byte("accounts"))
 
@@ -29,7 +32,9 @@ func checkAndUpdate() {
 		last := new(util.Date)
 		json.Unmarshal(get, last)
 
-		b = util.NewDate().NewerThan(last)
+		date := util.NewDate()
+		b = date.NewerThan(last)
+		days = date.DaysSince(last)
 
 		return nil
 	})
@@ -89,5 +94,12 @@ func init() {
 		Action:      Pay,
 		Usage:       "<user> <amount>",
 		Description: "Give some of your hard earned cash to some loser.",
+	})
+
+	commands.AddCommand(&commands.Command{
+		Aliases:     []string{"request"},
+		Action:      Request,
+		Usage:       "<user> <amount>",
+		Description: "Ask somebody to give some of their hard earned cash to some loser.",
 	})
 }
