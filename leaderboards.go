@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
-	"github.com/jozufozu/gregory/commands"
-	"github.com/jozufozu/gregory/util/cache"
+	"github.com/jozufozu/gregory/util"
 	"strconv"
 )
 
-func sendLeaderBoard(ctx *commands.Context, totals *ChannelStats, serverName, leaderBoardFormat string, prec int, heuristic func(stats *UserStats) float64, args ...string) {
+func sendLeaderBoard(ctx *util.Context, totals *ChannelStats, serverName, leaderBoardFormat string, prec int, heuristic func(stats *UserStats) float64, args ...string) {
 	users := make(map[string]*UserStats)
 	for k, v := range totals.Users {
 		users[k] = v
@@ -72,7 +71,7 @@ func sendLeaderBoard(ctx *commands.Context, totals *ChannelStats, serverName, le
 
 		buf.WriteString(times)
 		buf.WriteString(": ")
-		buf.WriteString(ctx.WhatDoICall(cache.LazyUserGet(ctx, userID)))
+		buf.WriteString(ctx.WhatDoICall(ctx.LazyUserGet(userID)))
 		buf.WriteString("\n")
 		i++
 	}
@@ -85,7 +84,7 @@ func sendLeaderBoard(ctx *commands.Context, totals *ChannelStats, serverName, le
 	})
 }
 
-func sendReactionStats(ctx *commands.Context, data *UserStats, name string, args ...string) {
+func sendReactionStats(ctx *util.Context, data *UserStats, name string, args ...string) {
 	reactions := make(map[string]uint64)
 	for k, v := range data.EmojisReacted {
 		reactions[k] = v

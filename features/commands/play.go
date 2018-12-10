@@ -1,6 +1,8 @@
 package commands
 
-func play(ctx *Context, raw string, args ...string) {
+import "github.com/jozufozu/gregory/util"
+
+func play(ctx *util.Context, raw string, args ...string) {
 	if len(args) > 0 {
 		ctx.UpdateStatus(0, raw)
 	} else {

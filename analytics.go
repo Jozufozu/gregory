@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
-	"github.com/jozufozu/gregory/commands"
-	"github.com/jozufozu/gregory/util/cache"
+	"github.com/jozufozu/gregory/features/commands"
+	"github.com/jozufozu/gregory/util"
 	"log"
 	"math"
 	"strings"
@@ -29,12 +29,12 @@ func init() {
 	commands.AddCommand(&commands.Command{
 		Aliases:     []string{"stats"},
 		Action:      Stats,
-		Usage:       "[react|messages|images|characters] <user>",
+		Usage:       "[react|shrug|messages|images|uniqueCharacters|characters|leederboard] <user>",
 		Description: "Preforms analysis on the given channel/server.",
 	})
 }
 
-func Stats(ctx *commands.Context, raw string, args ...string) {
+func Stats(ctx *util.Context, raw string, args ...string) {
 	guild, _ := ctx.GetGuild()
 
 	guildStats := GetLastGuildStats(guild.ID)
@@ -58,7 +58,7 @@ func Stats(ctx *commands.Context, raw string, args ...string) {
 		function                 = ""
 	)
 
-	user = cache.GetUser(ctx, args[0])
+	user = ctx.GetUser(args[0])
 	cut := 1
 
 	if user != nil {
@@ -157,25 +157,20 @@ func Stats(ctx *commands.Context, raw string, args ...string) {
 			}
 		},
 		"": func() {
-			ctx.Reply("Sorry, I don't know what you want me to do.")
+			ctx.Reply("Sorry, I don't know what stats you want to see.")
 		},
 	}
 
-	for k, v := range functions {
-		if strings.HasPrefix(strings.ToLower(k), function) {
-			v()
-			return
-		}
-	}
+	cmd := util.InferCommand(function, []string{"react", "shrug", "messages", "images", "uniqueCharacters", "characters", "leederboard"})
 
-	functions[""]()
+	functions[cmd]()
 }
 
 func eneleze(stats *UserStats) float64 {
 	return float64(stats.CharactersUsed['e']+stats.CharactersUsed['E']) / math.Sqrt(math.Pow(float64(stats.CharactersUsed[' ']+stats.MessagesSent), 2)+math.Pow(float64(stats.CharactersUsed['o']+stats.CharactersUsed['O']), 2))
 }
 
-func Analytics(ctx *commands.Context, raw string, args ...string) {
+func Analytics(ctx *util.Context, raw string, args ...string) {
 	channelID := ctx.ChannelID
 	full := false
 
@@ -241,7 +236,7 @@ func Analytics(ctx *commands.Context, raw string, args ...string) {
 	}
 }
 
-func sendChannelStats(ctx *commands.Context, totals *ChannelStats) {
+func sendChannelStats(ctx *util.Context, totals *ChannelStats) {
 	t := time.Now()
 
 	guild, _ := ctx.GetGuild()
@@ -279,7 +274,7 @@ func sendChannelStats(ctx *commands.Context, totals *ChannelStats) {
 	log.Printf("Analysis sent, took %s\n", time.Since(t))
 }
 
-func buildUserStatText(ctx *commands.Context, totals *ChannelStats) []*discordgo.MessageEmbedField {
+func buildUserStatText(ctx *util.Context, totals *ChannelStats) []*discordgo.MessageEmbedField {
 	builtUserFields := make([]*discordgo.MessageEmbedField, len(totals.Users))
 
 	type send struct {
@@ -295,7 +290,7 @@ func buildUserStatText(ctx *commands.Context, totals *ChannelStats) []*discordgo
 		go func(userID string, userStats *UserStats) {
 			defer wg.Done()
 
-			user := cache.LazyUserGet(ctx, userID)
+			user := ctx.LazyUserGet(userID)
 
 			if user == nil {
 				return
@@ -407,7 +402,7 @@ func getUserStatEmbeds(users []*discordgo.MessageEmbedField) []*discordgo.Messag
 	}
 }
 
-func GetGuildStats(ctx *commands.Context, guildID string, oldGuildStats *GuildStats) *GuildStats {
+func GetGuildStats(ctx *util.Context, guildID string, oldGuildStats *GuildStats) *GuildStats {
 	channels, _ := ctx.GuildChannels(guildID)
 
 	statsChan := make(chan *GuildStats, len(channels))
@@ -458,7 +453,7 @@ func GetGuildStats(ctx *commands.Context, guildID string, oldGuildStats *GuildSt
 	return masterStats
 }
 
-func GetChannelStats(ctx *commands.Context, channel *discordgo.Channel, existing *ChannelStats) (*ChannelStats, error) {
+func GetChannelStats(ctx *util.Context, channel *discordgo.Channel, existing *ChannelStats) (*ChannelStats, error) {
 	messages, err := getChannelMessages(ctx, channel, existing)
 
 	if err != nil {
@@ -484,7 +479,7 @@ func GetChannelStats(ctx *commands.Context, channel *discordgo.Channel, existing
 	return channelStats, nil
 }
 
-func getChannelMessages(ctx *commands.Context, channel *discordgo.Channel, existing *ChannelStats) ([]*discordgo.Message, error) {
+func getChannelMessages(ctx *util.Context, channel *discordgo.Channel, existing *ChannelStats) ([]*discordgo.Message, error) {
 	t := time.Now()
 
 	after := "0"
@@ -519,7 +514,7 @@ func getChannelMessages(ctx *commands.Context, channel *discordgo.Channel, exist
 	return master, nil
 }
 
-func parallelAnalyze(ctx *commands.Context, messages []*discordgo.Message) *ChannelStats {
+func parallelAnalyze(ctx *util.Context, messages []*discordgo.Message) *ChannelStats {
 	length := len(messages)
 	if length <= 500 {
 		return analyze(ctx, messages)
@@ -559,7 +554,7 @@ func parallelAnalyze(ctx *commands.Context, messages []*discordgo.Message) *Chan
 	return stats
 }
 
-func analyze(ctx *commands.Context, messages []*discordgo.Message) *ChannelStats {
+func analyze(ctx *util.Context, messages []*discordgo.Message) *ChannelStats {
 	stats := &ChannelStats{Users: make(map[string]*UserStats)}
 	wg := new(sync.WaitGroup)
 	mu := new(sync.Mutex)
@@ -568,7 +563,7 @@ func analyze(ctx *commands.Context, messages []*discordgo.Message) *ChannelStats
 		if message.Type != discordgo.MessageTypeDefault {
 			continue
 		}
-		go cache.KnowUser(message.Author)
+		go util.KnowUser(message.Author)
 
 		wg.Add(2)
 		go func() {

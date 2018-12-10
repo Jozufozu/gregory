@@ -4,24 +4,19 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
+	"github.com/jozufozu/gregory/util"
 	"strings"
 	"unicode"
 )
 
 func init() {
+
 	AddCommand(&Command{
 		Aliases:     []string{"help", "?"},
 		Action:      help,
 		Usage:       "",
 		Description: "Provides a list of available commands",
 	})
-
-	//AddCommand(&Command{
-	//	Aliases:     []string{"profile"},
-	//	Action:      profile,
-	//	Usage:       "[user]",
-	//	Description: "Sends you a user's profile picture",
-	//})
 
 	AddCommand(&Command{
 		Aliases:     []string{"play"},
@@ -84,7 +79,7 @@ const Bang = "&"
 
 // raw is the raw input of everything after the command token
 // args is all tokens after the command token separated by whitespace
-type Action func(ctx *Context, raw string, args ...string)
+type Action func(ctx *util.Context, raw string, args ...string)
 
 type Command struct {
 	Aliases     []string
@@ -94,6 +89,7 @@ type Command struct {
 }
 
 var commands = make([]*Command, 0)
+var names = make([]string, 0)
 var actions = make(map[string]Action)
 
 func AddCommand(command *Command) {
@@ -103,6 +99,7 @@ func AddCommand(command *Command) {
 
 	for _, name := range command.Aliases {
 		actions[name] = command.Action
+		names = append(names, name)
 	}
 
 	commands = append(commands, command)
@@ -114,14 +111,16 @@ func HandleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if strings.HasPrefix(m.Content, Bang) {
-		RunCommand(&Context{Session: s, Message: m.Message, guild: nil}, m.Content[1:])
+		RunCommand(&util.Context{Session: s, Message: m.Message}, m.Content[1:])
 	}
 }
 
-func RunCommand(ctx *Context, cmd string) {
+func RunCommand(ctx *util.Context, cmd string) {
 	args := splitArgs(&cmd)
 
-	if action, ok := actions[args[0]]; ok {
+	guess := util.InferCommand(args[0], names)
+
+	if action, ok := actions[guess]; ok {
 		raw := cmd[strings.Index(cmd, args[0])+len(args[0]):]
 		action(ctx, raw, args[1:]...)
 	} else {
@@ -150,7 +149,7 @@ func splitArgs(raw *string) []string {
 	return out
 }
 
-func help(ctx *Context, raw string, args ...string) {
+func help(ctx *util.Context, raw string, args ...string) {
 	if len(args) == 0 {
 		fields := make([]*discordgo.MessageEmbedField, len(commands))
 

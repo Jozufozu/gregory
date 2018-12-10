@@ -1,15 +1,25 @@
-package cache
+package util
 
 import (
+	"fmt"
 	"github.com/bwmarrin/discordgo"
-	"github.com/jozufozu/gregory/commands"
 	"strings"
 	"sync"
+	"time"
 )
+
+type Context struct {
+	*discordgo.Session
+	*discordgo.Message
+	guild *discordgo.Guild
+}
 
 const BotID = "387810222556708865"
 
 var (
+	typingStarter  = make(chan string)
+	typingFinisher = make(chan string)
+
 	SaveUser         = make(chan *discordgo.User, 256)
 	ConnectedServers = make(map[string]bool)
 	ConnectedUsers   = make(map[string]bool)
@@ -34,6 +44,106 @@ func init() {
 	}()
 }
 
+func ManageTyping(s *discordgo.Session) {
+	typingChannels := map[string]bool{}
+	timer := time.Tick(time.Second * 4)
+
+	for {
+		select {
+		case <-timer:
+			for channel, typing := range typingChannels {
+				if typing {
+					s.ChannelTyping(channel)
+				}
+			}
+		case id := <-typingStarter:
+			typingChannels[id] = true
+			s.ChannelTyping(id)
+		case id := <-typingFinisher:
+			delete(typingChannels, id)
+		}
+	}
+}
+
+func (ctx *Context) WhatDoICall(user *discordgo.User) (name string) {
+	if user == nil {
+		return "An old friend"
+	}
+	name = user.Username
+
+	if channel, err := ctx.Channel(ctx.ChannelID); err == nil {
+		if member, err := ctx.GuildMember(channel.GuildID, user.ID); err == nil && member.Nick != "" {
+			name = member.Nick
+		}
+	}
+
+	return
+}
+
+func (ctx *Context) HowDoISay(emoji *discordgo.Emoji) (name string) {
+	if emoji.ID == "" {
+		name = emoji.Name
+	} else {
+		name = fmt.Sprintf("<:%s:%s>", emoji.Name, emoji.ID)
+	}
+
+	return
+}
+
+func (ctx *Context) GetGuild() (*discordgo.Guild, error) {
+
+	if ctx.guild != nil {
+		return ctx.guild, nil
+	}
+
+	channel, err := ctx.GetChannel()
+
+	if err != nil {
+		return nil, err
+	}
+
+	ctx.StateEnabled = false
+	guild, err := ctx.Guild(channel.GuildID)
+	ctx.StateEnabled = true
+
+	if err != nil {
+		return nil, err
+	}
+	ctx.guild = guild
+
+	return guild, err
+}
+
+func (ctx *Context) GetChannel() (*discordgo.Channel, error) {
+	return ctx.Channel(ctx.ChannelID)
+}
+
+func (ctx *Context) StartTyping() {
+	typingStarter <- ctx.ChannelID
+}
+
+func (ctx *Context) DoneTyping() {
+	typingFinisher <- ctx.ChannelID
+}
+
+func (ctx *Context) Reply(msg string) {
+	ctx.ChannelMessageSend(ctx.ChannelID, msg)
+}
+
+func (ctx *Context) ReplyDelete(msg string, after time.Duration) {
+	message, _ := ctx.ChannelMessageSend(ctx.ChannelID, msg)
+
+	timer := time.NewTimer(after).C
+
+	go func() {
+		select {
+		case <-timer:
+			ctx.ChannelMessageDelete(message.ChannelID, message.ID)
+			break
+		}
+	}()
+}
+
 func KnowUser(user *discordgo.User) bool {
 	mu.Lock()
 	_, know := idsToUsers[user.ID]
@@ -44,7 +154,7 @@ func KnowUser(user *discordgo.User) bool {
 	return know
 }
 
-func LazyUserGet(ctx *commands.Context, userID string) *discordgo.User {
+func (ctx *Context) LazyUserGet(userID string) *discordgo.User {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -61,8 +171,8 @@ func LazyUserGet(ctx *commands.Context, userID string) *discordgo.User {
 	return nil
 }
 
-func GetUserOrSender(ctx *commands.Context, arg string) *discordgo.User {
-	user := GetUser(ctx, arg)
+func (ctx *Context) GetUserOrSender(arg string) *discordgo.User {
+	user := ctx.GetUser(arg)
 
 	if user != nil {
 		return user
@@ -71,7 +181,7 @@ func GetUserOrSender(ctx *commands.Context, arg string) *discordgo.User {
 	return ctx.Author
 }
 
-func GetUser(ctx *commands.Context, arg string) *discordgo.User {
+func (ctx *Context) GetUser(arg string) *discordgo.User {
 	if len(arg) == len(BotID) {
 		user, err := ctx.User(arg)
 

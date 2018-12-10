@@ -2,14 +2,15 @@ package commands
 
 import (
 	"github.com/jozufozu/gregory/util"
+	"math/rand"
 	"strconv"
 )
 
-func d20(ctx *Context, raw string, args ...string) {
-	ctx.Reply(strconv.FormatInt(util.Rand.Int63n(20), 10))
+func d20(ctx *util.Context, raw string, args ...string) {
+	ctx.Reply(strconv.FormatInt(rand.Int63n(20), 10))
 }
 
-func roll(ctx *Context, raw string, args ...string) {
+func roll(ctx *util.Context, raw string, args ...string) {
 	var sides, rolls int64 = 6, 1
 
 	if len(args) > 0 {
@@ -36,7 +37,7 @@ func roll(ctx *Context, raw string, args ...string) {
 
 	for i := int64(0); i < rolls; i++ {
 		go func() {
-			ch <- util.Rand.Int63n(sides)
+			ch <- rand.Int63n(sides)
 		}()
 	}
 

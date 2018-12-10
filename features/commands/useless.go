@@ -1,6 +1,9 @@
 package commands
 
-import "github.com/jozufozu/gregory/util"
+import (
+	"github.com/jozufozu/gregory/util"
+	"math/rand"
+)
 
 var sitesList = []string{
 	"http://heeeeeeeey.com/",
@@ -80,8 +83,8 @@ var sitesList = []string{
 	"http://burnie.com/",
 }
 
-func bored(ctx *Context, raw string, args ...string) {
-	i := util.Rand.Int63n(int64(len(sitesList)))
+func bored(ctx *util.Context, raw string, args ...string) {
+	i := rand.Int63n(int64(len(sitesList)))
 
 	ctx.Reply(sitesList[i])
 }

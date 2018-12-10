@@ -1,7 +1,9 @@
-package commands
+package util
 
 import (
+	"fmt"
 	"github.com/bwmarrin/discordgo"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,6 +17,39 @@ type prompt struct {
 
 var promptsMutex = new(sync.Mutex)
 var prompts = map[*prompt]bool{}
+
+func (ctx *Context) Confirm(user *discordgo.User, action func()) {
+	ctx.ConfirmWithMessage(user, "", action)
+}
+
+func (ctx *Context) ConfirmWithMessage(user *discordgo.User, message string, action func()) {
+	ctx.Prompt(user, message, "🆗", "🚫", action)
+}
+
+func (ctx *Context) Prompt(user *discordgo.User, message, actionButton, cancelButton string, action func()) {
+	if user.Bot {
+		action()
+		return
+	}
+
+	if message != "" {
+		message = strings.TrimSpace(message)
+		message += "\n"
+	}
+
+	msg, _ := ctx.ChannelMessageSend(ctx.ChannelID, fmt.Sprintf("%s\n%sClick %s to confirm, %s to cancel.", user.Mention(), message, actionButton, cancelButton))
+	ctx.MessageReactionAdd(ctx.ChannelID, msg.ID, actionButton)
+	ctx.MessageReactionAdd(ctx.ChannelID, msg.ID, cancelButton)
+
+	addPrompt(ctx, &prompt{
+		user:         user.ID,
+		channel:      ctx.ChannelID,
+		message:      msg.ID,
+		actionButton: actionButton,
+		cancelButton: cancelButton,
+		action:       action,
+	})
+}
 
 func addPrompt(ctx *Context, prompt *prompt) {
 	ch := make(chan bool)

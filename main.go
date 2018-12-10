@@ -3,16 +3,16 @@ package main
 import (
 	"fmt"
 	"github.com/bwmarrin/discordgo"
-	"github.com/jozufozu/gregory/commands"
-	"github.com/jozufozu/gregory/economy"
-	"github.com/jozufozu/gregory/util/cache"
+	"github.com/jozufozu/gregory/features/commands"
+	"github.com/jozufozu/gregory/util"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
-	"unicode"
+	"time"
 )
 
 func main() {
@@ -21,10 +21,11 @@ func main() {
 		log.Fatalf("error opening file: %v", err)
 	}
 	defer f.Close()
-	log.SetOutput(io.MultiWriter(f, os.Stdout))
-	defer economy.Data.Close()
 	defer AnalyticsStore.Close()
 	defer Save()
+	log.SetOutput(io.MultiWriter(f, os.Stdout))
+
+	rand.Seed(time.Now().UnixNano())
 
 	getenv, ok := os.LookupEnv("GREGORY_TOKEN")
 
@@ -40,12 +41,12 @@ func main() {
 	}
 
 	dg.AddHandler(HandleLog)
-	dg.AddHandler(HandleReddit)
 	dg.AddHandler(commands.HandleMessage)
-	dg.AddHandler(commands.PromptHandler)
+	dg.AddHandler(util.HandleTipRequest)
+	dg.AddHandler(util.PromptHandler)
+	dg.AddHandler(util.UpdateServers)
 
-	dg.AddHandlerOnce(cache.LoadUserCache)
-	dg.AddHandler(cache.UpdateServers)
+	dg.AddHandlerOnce(util.LoadUserCache)
 
 	err = dg.Open()
 	if err != nil {
@@ -55,7 +56,7 @@ func main() {
 
 	defer dg.Close()
 
-	go commands.ManageTyping(dg)
+	go util.ManageTyping(dg)
 
 	log.Println("Bot is now running.  Press CTRL-C or enter \"exit\" to exit.")
 	sc := make(chan os.Signal, 1)
@@ -75,33 +76,8 @@ func main() {
 	<-sc
 }
 
-func HandleReddit(s *discordgo.Session, m *discordgo.MessageCreate) {
-	ctx := commands.Context{Session: s, Message: m.Message}
-
-	if index := strings.Index(m.Content, "r/"); index >= 0 {
-		end := -1
-		for i, rune := range m.Content[index+2:] {
-			if !(unicode.IsLetter(rune) || unicode.IsNumber(rune) || rune == '-' || rune == '_') {
-				end = i + index - 2
-				break
-			}
-		}
-
-		if end == -1 {
-			end = len(m.Content)
-		}
-
-		embed := &discordgo.MessageEmbed{
-			Title: m.Content[index:end],
-			URL:   "https://reddit.com/r/" + m.Content[(index+2):end],
-			Color: 0xff4906,
-		}
-		ctx.ChannelMessageSendEmbed(ctx.ChannelID, embed)
-	}
-}
-
 func HandleLog(s *discordgo.Session, m *discordgo.MessageCreate) {
-	ctx := commands.Context{Session: s, Message: m.Message}
+	ctx := util.Context{Session: s, Message: m.Message}
 	guild, _ := ctx.GetGuild()
 	channel, _ := ctx.GetChannel()
 

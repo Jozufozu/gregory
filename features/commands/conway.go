@@ -3,6 +3,7 @@ package commands
 
 import (
 	"bytes"
+	"github.com/jozufozu/gregory/util"
 	"image"
 	"image/color"
 	"image/gif"
@@ -93,7 +94,7 @@ type frame struct {
 	img *image.Paletted
 }
 
-func conway(ctx *Context, raw string, args ...string) {
+func conway(ctx *util.Context, raw string, args ...string) {
 	var w, h, steps = 200, 200, 100
 
 	l := NewLife(w, h)
