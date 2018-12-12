@@ -1,1 +1,1 @@
-worker: go build && ./gregory.exe
+worker: go build && gregory.exe
