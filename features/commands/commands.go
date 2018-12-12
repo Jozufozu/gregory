@@ -26,6 +26,20 @@ func init() {
 	})
 
 	AddCommand(&Command{
+		Aliases:     []string{"profile"},
+		Action:      profile,
+		Usage:       "[user]",
+		Description: "Returns the full size profile picture of [user]",
+	})
+
+	AddCommand(&Command{
+		Aliases:     []string{"weeb"},
+		Action:      weeb,
+		Usage:       "[text]",
+		Description: "Transforms text to and from japanese characters",
+	})
+
+	AddCommand(&Command{
 		Aliases:     []string{"conway", "gol"},
 		Action:      conway,
 		Usage:       "",

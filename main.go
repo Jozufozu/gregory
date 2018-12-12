@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"github.com/jozufozu/gregory/features/commands"
+	"github.com/jozufozu/gregory/features/nani"
+	"github.com/jozufozu/gregory/features/reddit"
 	"github.com/jozufozu/gregory/util"
 	"io"
 	"log"
@@ -45,6 +47,8 @@ func main() {
 	dg.AddHandler(util.HandleTipRequest)
 	dg.AddHandler(util.PromptHandler)
 	dg.AddHandler(util.UpdateServers)
+	dg.AddHandler(reddit.HandleRedditMessage)
+	dg.AddHandler(nani.HandleNani)
 
 	dg.AddHandlerOnce(util.LoadUserCache)
 

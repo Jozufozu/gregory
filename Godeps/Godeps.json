@@ -2,9 +2,6 @@
 	"ImportPath": "github.com/jozufozu/gregory",
 	"GoVersion": "go1.11",
 	"GodepVersion": "v80",
-	"Packages": [
-		"./..."
-	],
 	"Deps": [
 		{
 			"ImportPath": "github.com/Krognol/go-wolfram",
@@ -19,6 +16,10 @@
 			"ImportPath": "github.com/bwmarrin/discordgo",
 			"Comment": "v0.17.0-2-g9ce7456",
 			"Rev": "9ce745633f5df2849c8f03d7e8cd0b1fb6d35001"
+		},
+		{
+			"ImportPath": "github.com/gojp/kana",
+			"Rev": "6edbc04c5042be5f41cc1bd59cdcdc933a66424b"
 		},
 		{
 			"ImportPath": "github.com/gorilla/websocket",
