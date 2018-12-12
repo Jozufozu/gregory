@@ -11,9 +11,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -64,7 +62,7 @@ func main() {
 
 	log.Println("Bot is now running.  Press CTRL-C or enter \"exit\" to exit.")
 	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+	//signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 
 	go func() {
 		for {
